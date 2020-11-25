@@ -30,6 +30,7 @@ struct termios options,options_old;
 #define TID_Z_I2C_SC 2
 #define TID_A_I2C_SC 3
 #define TID_Z_I2C_TEMP 4
+#define TID_Z_I2C_RD_FPGA_TEMP 5
 
 
 #define TID_R_TEST 100
@@ -49,6 +50,7 @@ static struct symstruct lookuptable[] = {
 	{ "TID_Z_TEST",TID_Z_TEST},
 	{ "TID_R_TEST",TID_R_TEST},
 	{ "TID_A_TEST",TID_A_TEST},
+	{ "TID_Z_I2C_RD_FPGA_TEMP",TID_Z_I2C_RD_FPGA_TEMP},
 	{ "B2", BADKEY }
 };
 
@@ -110,6 +112,9 @@ int Run_cmd(char *buff, int fd)
     int bytes_sent = 0;
     char result_buf[BUF_SIZE];
     switch (keyfromstring(buff)) {
+	   case TID_Z_I2C_RD_FPGA_TEMP:
+
+		   break;
 	   case TID_R_I2C_SC:
 		   fp = popen("i2cdetect -y 1","r");
 		   if(fp != NULL) {
