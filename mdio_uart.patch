@@ -1,0 +1,510 @@
+diff --git a/rtos/cortex_a/soc/io/common/qnx/eth/AmbaUserEnetConfig.c b/rtos/cortex_a/soc/io/common/qnx/eth/AmbaUserEnetConfig.c
+index dd879ef7..4678083a 100644
+--- a/rtos/cortex_a/soc/io/common/qnx/eth/AmbaUserEnetConfig.c
++++ b/rtos/cortex_a/soc/io/common/qnx/eth/AmbaUserEnetConfig.c
+@@ -180,7 +180,8 @@ AMBA_ENET_CONFIG_s EnetConfig[ENET_INSTANCES] = {
+     [0] = {
+         .Idx        = 0,
+         .pDes       = &EnetDes[0],
+-        .pPhyInitCb = UserPhyInitCb0,
++//        .pPhyInitCb = UserPhyInitCb0,
++        .pPhyInitCb = NULL,
+         .pPreInitCb = UserPreInitCb,
+ #if defined(CONFIG_THREADX)
+         .pRxCb       = UserRxCb,
+@@ -190,7 +191,8 @@ AMBA_ENET_CONFIG_s EnetConfig[ENET_INSTANCES] = {
+     [1] = {
+         .Idx        = 1,
+         .pDes       = &EnetDes[1],
+-        .pPhyInitCb = UserPhyInitCb1,
++//        .pPhyInitCb = UserPhyInitCb1,
++        .pPhyInitCb = NULL,
+         .pPreInitCb = UserPreInitCb,
+ #if defined(CONFIG_THREADX)
+         .pRxCb       = UserRxCb,
+diff --git a/rtos/cortex_a/svc/apps/icam/core/sys/SvcShell.c b/rtos/cortex_a/svc/apps/icam/core/sys/SvcShell.c
+index 46952261..10db13e4 100755
+--- a/rtos/cortex_a/svc/apps/icam/core/sys/SvcShell.c
++++ b/rtos/cortex_a/svc/apps/icam/core/sys/SvcShell.c
+@@ -268,6 +268,7 @@ UINT32 SvcShell_Init(UINT32 CliPriority,
+         {.pName = "eeprom",  .MainFunc = AmbaEEPRomUT_TestCmd,           .pNext = NULL},
+ #endif
+         {.pName = "gpio",    .MainFunc = AmbaShell_CommandGpio,          .pNext = NULL},
++        {.pName = "uart",    .MainFunc = AmbaShell_CommandUart,          .pNext = NULL},
+ 
+ #ifdef CONFIG_ENABLE_AMBALINK
+         {.pName = "ambalink", .MainFunc = AmbaShell_CommandAmbaLink,     .pNext = NULL},
+diff --git a/rtos/cortex_a/svc/apps/icam/main/SvcInitTask.c b/rtos/cortex_a/svc/apps/icam/main/SvcInitTask.c
+index 3f447cd9..ae75f9f5 100755
+--- a/rtos/cortex_a/svc/apps/icam/main/SvcInitTask.c
++++ b/rtos/cortex_a/svc/apps/icam/main/SvcInitTask.c
+@@ -109,21 +109,169 @@
+ #include "SvcAppStat.h"
+ #include "AmbaUART.h"
+ 
++#include "AmbaTypes.h"
++#include "AmbaKAL.h"
++#include "AmbaI2C.h"
++#include "AmbaGPIO.h"
++
++
++
++#include "AmbaShell.h"
++#include "AmbaShell_Commands.h"
++#include "AmbaFS.h"
++#include "AmbaWrap.h"
++#include "AmbaPrint.h"
++#include "AmbaGPIO.h"
++#include "AmbaMisraFix.h"
++
++#include "SvcLog.h"
++#include "SvcErrCode.h"
++#include "SvcCmdDSP.h"
++#include "SvcCmdSys.h"
++#include "SvcShell.h"
++#include "SvcCmdPbk.h"
++#include "SvcCmd.h"
++#include "SvcWrap.h"
++#include "AmbaENET_Def.h"
++
++#include "AmbaENET.h"
++ #include "NetStack.h"
++ #include "AmbaKAL.h"
++ #include "RefCode_LwIP.h"
++ #include "RefCode_NetX.h"
++ #include "NetXStack.h"
++ #include "AmbaUART.h"
++ #include "DemoStack.h"
++ #include "AvbStack.h"
++ #include "RefCode_Avdecc.h"
++ #include "RefCode_Avtp.h"
++ #include "AmbaCFS.h"
++ #include "RefCode_FileFeed.h"
++
++//#include "inc/rtsl/AmbaRTSL_ENET.h"
++//#include "AmbaUserEnetConfig.c"
++
++
++//#if defined(CONFIG_NETX_ENET) || defined(CONFIG_LWIP_ENET)
++#include "AmbaShell_Enet.h"
++//#endif
++
++//#include "AmbaENET.h"
++//#include "AmbaRTSL_ENET.h"
++
++
++#include "AmbaDef.h"
++#include "AmbaUtility.h"
++#include "AmbaShell.h"
++#include "AmbaShell_Enet.h"
++#include "AmbaENET.h"
++#include "AmbaPrint.h"
++
++#if defined(CONFIG_NETX_ENET) || defined(CONFIG_AMBA_UDPIP) || defined(CONFIG_AMBA_AVB)
++#include "NetStack.h"
++#endif
++
++#if defined(CONFIG_NETX_ENET) || defined(CONFIG_LWIP_ENET) || defined(CONFIG_AMBA_UDPIP)
++#include "AmbaKAL.h"
++#endif
++#ifdef CONFIG_LWIP_ENET
++#include "RefCode_LwIP.h"
++#endif
++          
++#ifdef CONFIG_NETX_ENET
++#include "RefCode_NetX.h"
++#include "NetXStack.h"
++#ifdef CONFIG_NETX_TELNET
++#include "AmbaUART.h"
++#endif
++#endif
++#ifdef CONFIG_AMBA_UDPIP
++#include "DemoStack.h"
++#endif
++#ifdef CONFIG_AMBA_AVB
++#include "AvbStack.h"
++#include "RefCode_Avdecc.h"
++#ifdef CONFIG_AMBA_AVTP_REFCODE
++#include "RefCode_Avtp.h"
++#include "AmbaCFS.h"
++#include "RefCode_FileFeed.h"
++#endif
++#endif
++                   
++
++
++
++static UINT8 DiagI2cDataBuf[2][128];
++
+ #define SVC_LOG_INIT                "INIT"
+ 
+ #define INIT_TASK_STACK_SIZE        (0x8000U)
+ 
+ 
++
++/*
++typedef struct {
++    const UINT32           Idx;
++    UINT8                  Mac[6];
++    UINT32                 LinkSpeed;
++    AMBA_ENET_DES_s *const pDes;
++    AMBA_ENET_LINKUP_f     pLinkUp;
++    AMBA_ENET_LINKDOWN_f   pLinkDown;
++    AMBA_ENET_TASKENTRY_f  pTaskEntry;
++    AMBA_ENET_PREINIT_f    pPreInitCb;
++    AMBA_ENET_PHYINIT_f    pPhyInitCb;
++    AMBA_ENET_RX_f         pRxCb;
++} AMBA_ENET_CONFIG_s;
++
++*/
++
++
++/*
++extern AMBA_ENET_CONFIG_s EnetConfig[ENET_INSTANCES];
++AMBA_ENET_CONFIG_s EnetConfig[ENET_INSTANCES] = {
++    [0] = { 
++        .Idx        = 0,
++        .pDes       = &EnetDes[0],
++        .pPhyInitCb = UserPhyInitCb0,
++        .pPreInitCb = UserPreInitCb,
++#if defined(CONFIG_THREADX)
++        .pRxCb       = UserRxCb,
++#endif  
++    },      
++#if (ENET_INSTANCES >= 2U) 
++    [1] = { 
++        .Idx        = 1,
++        .pDes       = &EnetDes[1],
++        .pPhyInitCb = UserPhyInitCb1,
++        .pPreInitCb = UserPreInitCb,
++#if defined(CONFIG_THREADX)
++        .pRxCb       = UserRxCb,
++#endif
++    },
++#endif
++};
++
++
++
++
++*/
++
++
++
++
++
++
+ struct symstruct
+ {
+         char *key;
+         int val;
+ };
+-
+ #define TID_R_I2C_SC 1
+ #define TID_Z_I2C_SC 2
+ #define TID_A_I2C_SC 3
+-#define TID_Z_I2C_TEMP 4
++#define TID_A_GPIO_SET_SHOW 4
++#define TID_A_PING_SET 5
++#define TID_Z_I2C_TEMP 6
+ 
+ 
+ #define TID_R_TEST 100
+@@ -139,6 +287,8 @@ static struct symstruct lookuptable[] = {
+         { "TID_R_I2C_SC",TID_R_I2C_SC},
+         { "TID_Z_I2C_SC",TID_Z_I2C_SC},
+         { "TID_A_I2C_SC",TID_A_I2C_SC},
++        { "TID_A_GPIO_SET_SHOW",TID_A_GPIO_SET_SHOW},
++        { "TID_A_PING_SET",TID_A_PING_SET},
+         { "TID_Z_I2C_TEMP",TID_Z_I2C_TEMP},
+         { "TID_Z_TEST",TID_Z_TEST},
+         { "TID_R_TEST",TID_R_TEST},
+@@ -457,6 +607,131 @@ int keyfromstring(char *key)
+ }
+ 
+ 
++static INT32 Str2NetOdrIP(const char *src, UINT32 *addr)
++{
++    INT32 saw_digit, octets;
++    char ch;
++    UINT8 tmp[4], *tp;
++    INT32 Ret = 0;
++
++    saw_digit   = 0;
++    octets      = 0;
++    tp = tmp;
++    *(tp) = 0;
++    ch = *src;
++    while ((ch) != '\0') {
++        if ((ch >= '0') && (ch <= '9')) {
++            UINT32 new = (UINT32)*tp * 10U;
++            UINT8 c = (UINT8)ch - (UINT8)'0';
++            new = new + (UINT32)c;
++
++            if (new > 255U) {
++                Ret = 1;
++            }
++            *tp = (UINT8)new;
++            if (saw_digit == 0) {
++                if (++octets > 4) {
++                    Ret = 1;
++
++            }
++                saw_digit = 1;
++            }
++        } else if ((ch == '.') && (saw_digit != 0)) {
++            if (octets == 4) {
++                Ret = 1;
++            }
++            tp++;
++            *tp = 0U;
++            saw_digit = 0;
++        } else {
++            Ret = 1;
++            break;
++        }
++        src++;
++        ch = *src;
++    }
++    if (octets < 4) {
++        Ret = 1;
++    }
++
++    AmbaMisra_TypeCast32(addr, tmp);
++    return Ret;
++}
++
++
++/*
++extern void EnetUserTaskCreate(UINT32 Idx);
++void EnetUserTaskCreate(UINT32 Idx)
++{
++    static char taskname[2][32] = { "Enet0RxTask", "Enet1RxTask" };
++    const AMBA_ENET_CONFIG_s *pEnetConfig = &(EnetConfig[Idx]);
++    UINT32 err;
++    static UINT8 EnetTaskStack[ENET_INSTANCES][EnetTaskStackSize] __attribute__((section(".bss.noinit")));
++    static AMBA_KAL_TASK_t EnetTask[ENET_INSTANCES] = {
++        [0] = {
++            .tx_thread_id = 0U,
++        },
++#if (ENET_INSTANCES >= 2U)
++        [1] = {
++            .tx_thread_id = 0U,
++        },
++#endif
++    };
++
++
++    if (EnetTask[Idx].tx_thread_id == 0U) {
++        const UINT8 *pBuf;
++        void *ptr;
++        UINT32 pri;
++	if (Idx == 0U) {
++            pri = 92U;
++        } else {
++            pri = 95U;
++        }
++        (void)AmbaWrap_memset(&EnetTaskStack[Idx][0], 0, EnetTaskStackSize);
++        pBuf = &EnetTaskStack[Idx][0];
++        AmbaMisra_TypeCast32(&ptr, &pBuf);
++        err = AmbaKAL_TaskCreate(&EnetTask[Idx],
++                                 taskname[Idx],
++                                 pri,
++                                 pEnetConfig->pTaskEntry,
++                                 Idx,
++                                 ptr,
++                                 EnetTaskStackSize,
++                                 0U);
++        if (err != 0U) {
++            AmbaPrint_PrintStr5("%s %s AmbaKAL_TaskCreate failed %s", ANSI_RED, __func__, ANSI_RESET, NULL, NULL);
++        }
++
++        // Using Core-0 (0x01)
++        err = AmbaKAL_TaskSetSmpAffinity(&EnetTask[Idx], 1U);
++        if (err != 0U) {
++            AmbaPrint_PrintStr5("%s %s AmbaKAL_TaskSetSmpAffinity failed %s", ANSI_RED, __func__, ANSI_RESET, NULL, NULL);
++        }
++        err = (UINT32)AmbaKAL_TaskResume(&EnetTask[Idx]);
++        if (err != 0U) {
++            AmbaPrint_PrintStr5("%s %s AmbaKAL_TaskResume failed %s", ANSI_RED, __func__, ANSI_RESET, NULL, NULL);
++        }
++    }
++}
++#endif
++
++
++
++
++
++
++
++
++
++*/
++
++
++
++
++
++
++
+ static int Run_cmd(char *buff, int *tid)
+ {
+    switch (keyfromstring(buff)) {
+@@ -480,6 +755,7 @@ static void ADTaskEntry(UINT32 EntryArg)
+     static UINT8 ADUartRxBuf[RX_BUFFER_SIZE] GNU_SECTION_NOZEROINIT;
+     UINT8 pRxBuf[RX_BUFFER_SIZE];
+     int tid;
++    const UINT32 _Idx;
+     int err = -1;
+     UINT32  Rval;
+     UINT32 RxSize = 0U;
+@@ -487,10 +763,17 @@ static void ADTaskEntry(UINT32 EntryArg)
+     UINT32 RxStringSize = RX_BUFFER_SIZE;
+     UINT32 TxStringSize = 100U; 
+     UINT8 pTxBuf[TxStringSize];
+-    
++    UINT32 i, j, ActualSize, RetVal = 0;
++    AMBA_I2C_TRANSACTION_s TxCtrl, RxCtrl;
++    UINT32 NumTxTransaction = 0U, NumRxTransaction = 0U;
+     UINT8 RxData = 0U;
+-    AMBA_UART_CONFIG_s  UartConfig = {0};
+ 
++    UINT32 ArgCount = 3U;
++    //char *const *pArgVector = {"diag_i2c", "0" ,"scan"};
++    char *PrintFunc;
++    UINT32 I2cChan = 0U;
++    AMBA_UART_CONFIG_s  UartConfig = {0};
++    UINT32 Val=0,GpioId;
+     UartConfig.NumDataBits   = AMBA_UART_DATA_8_BIT;
+     UartConfig.ParityBitMode = AMBA_UART_PARITY_NONE;
+     UartConfig.NumStopBits   = AMBA_UART_STOP_1_BIT;
+@@ -525,7 +808,59 @@ static void ADTaskEntry(UINT32 EntryArg)
+ 			AmbaWrap_memcpy(pTxBuf+1,&RxData,1U);	
+ 	    		(void)AmbaUART_Write(AMBA_UART_APB_CHANNEL0,0U, TxStringSize, pTxBuf, &TxSize, 100U);
+ 			break;
+-            }
++          	case TID_A_I2C_SC:
++
++//			#ifdef CONFIG_ICAM_USE_DIAG_COMMANDS
++//			extern  void AmbaDiag_I2C(UINT32 ArgCount, char * const *pArgVector, AMBA_SHELL_PRINT_f PrintFunc);
++//			AmbaDiag_I2C( ArgCount, pArgVector, PrintFunc);
++			break;			
++		case TID_A_GPIO_SET_SHOW:
++                      (void)AmbaUtility_StringToUInt32(pRxBuf[19], &GpioId);
++	  		  for (i = 0U; i < AMBA_NUM_GPIO_PIN; i++) {
++					if(i==GpioId)
++		  		  SvcLog_OK("Pin Gpio","%d %d ",i,0U);
++			  }
++		         // AmbaWrap_memset(pRxBuf,0x0,20U);
++		//	 SvcLog_OK("Pin Gpio","%d %d ",i,0U);
++		  //      (void) AmbaUART_Read(AMBA_UART_APB_CHANNEL0, 0U, RxStringSize, (UINT8 *)pRxBuf, &RxSize, 100U);
++                    //`   (void)AmbaUtility_StringToUInt32(pRxBuf, &GpioId);
++		
++		//	if (GpioId > 0U) {
++        	  //              (void)AmbaGPIO_SetFuncGPO(GpioId, AMBA_GPIO_LEVEL_HIGH);
++	           //     } else {
++               // 	        (void)AmbaGPIO_SetFuncGPO(GpioId, AMBA_GPIO_LEVEL_LOW);
++		//	  }
++			  break;
++
++		case TID_A_PING_SET:
++   	               // EnetConfig[ENET_INSTANCES];
++/*
++			EnetConfig[ENET_INSTANCES];
++             		(void) EnetUserTaskCreate(UINT32 Idx);
++             		(void) AmbaPrint_ModuleSetAllowList(ETH_MODULE_ID, 1U);
++		        (void) AmbaEnet_SetConfig(_Idx,&(EnetConfig[_Idx]));
++	          	AMBA_ENET_CONFIG_s *pEnetConfig;
++
++			 (void) AmbaEnet_GetConfig(Idx, &pEnetConfig);
++		        (void) Str2Mac(mac_addr, pEnetConfig->Mac);
++
++		        (void)AmbaEnet_Init(pEnetConfig);
++     
++		       
++			EnetInit(_Idx, "00:11:22:33:44:55");
++                        EnetUserTaskCreate(_Idx);
++			 UINT32 IpAddr;
++		         AMBA_DEMO_STACK_CONFIG_s *pDemoConfig;
++	                 (void) AmbaDemoStack_GetConfig(_Idx, &pDemoConfig);
++	                 (void) Str2NetOdrIP("192.168.1.100", &IpAddr);
++	                 pDemoConfig->Ip = IpAddr;
++*/				
++	    		(void)AmbaUART_Write(AMBA_UART_APB_CHANNEL0, 0U, TxStringSize, pTxBuf, &TxSize, 100U);
++			AmbaWrap_memcpy(pTxBuf,"\rSuccessfully_PING_Set",TxStringSize);
++
++			  break;
++
++	    }
+ 	    (void)AmbaWrap_memset(pRxBuf,0,100);
+         } else {
+ 		continue;
+diff --git a/rtos/cortex_a/svc/comsvc/Kconfig b/rtos/cortex_a/svc/comsvc/Kconfig
+index dedf7ccc..d0589c2c 100755
+--- a/rtos/cortex_a/svc/comsvc/Kconfig
++++ b/rtos/cortex_a/svc/comsvc/Kconfig
+@@ -14,6 +14,14 @@ if BUILD_COMMON_SERVICE_PRINTF
+ source svc/comsvc/print/Kconfig
+ endif
+ 
++config BUILD_COMMON_SERVICE_UART
++	bool "Build uart functions"
++    default y
++
++if BUILD_COMMON_SERVICE_UART
++source svc/comsvc/uart/Kconfig
++endif
++
+ config BUILD_COMMON_SERVICE_SHELL
+ 	bool "Build shell functions"
+     default y
+diff --git a/rtos/cortex_a/svc/comsvc/Makefile b/rtos/cortex_a/svc/comsvc/Makefile
+index 849f78ac..aaf27e83 100755
+--- a/rtos/cortex_a/svc/comsvc/Makefile
++++ b/rtos/cortex_a/svc/comsvc/Makefile
+@@ -15,6 +15,10 @@ ifneq ($(wildcard $(srctree)/$(src)/print),)
+ include $(srctree)/$(src)/print/Makefile
+ endif
+ 
++ifneq ($(wildcard $(srctree)/$(src)/uart),)
++include $(srctree)/$(src)/uart/Makefile
++endif
++
+ ifneq ($(wildcard $(srctree)/$(src)/shell),)
+ include $(srctree)/$(src)/shell/Makefile
+ endif
+@@ -86,6 +90,10 @@ ifneq ($(wildcard $(srctree)/$(src)/usb),)
+ obj-$(CONFIG_BUILD_COMMON_SERVICE_USB) += usb/
+ endif
+ 
++ifneq ($(wildcard $(srctree)/$(src)/uart),)
++obj-$(CONFIG_BUILD_COMMON_SERVICE_UART) += uart/
++endif
++
+ ifneq ($(wildcard $(srctree)/$(src)/anim),)
+ obj-$(CONFIG_BUILD_COMMON_SERVICE_ANIM) += anim/
+ endif
+@@ -99,6 +107,7 @@ ccflags-y += -I$(srctree)/vendors/ambarella/inc/prfile2
+ ccflags-y += -I$(srctree)/vendors/ambarella/inc/threadx
+ ccflags-y += -I$(srctree)/$(src)/print
+ ccflags-y += -I$(srctree)/$(src)/shell
++#ccflags-y += -I$(srctree)/$(src)/uart
+ 
+ install-files   := $(OBJ_NAME).a
+ 
+diff --git a/rtos/cortex_a/svc/comsvc/shell/commands/AmbaShell_Commands.h b/rtos/cortex_a/svc/comsvc/shell/commands/AmbaShell_Commands.h
+index 07198f3e..33567694 100755
+--- a/rtos/cortex_a/svc/comsvc/shell/commands/AmbaShell_Commands.h
++++ b/rtos/cortex_a/svc/comsvc/shell/commands/AmbaShell_Commands.h
+@@ -107,6 +107,7 @@ void   AmbaShell_CommandVersionInit(AMBA_SHELL_LIBINFO *pLibInfo, UINT32 InfoNum
+ UINT32 AmbaShell_CommandDspLogInit(const void *pDspDebugLogBuf, UINT32 DspDebugLogSize);
+ 
+ void AmbaShell_CommandUsb(UINT32 ArgCount, char * const * pArgVector, AMBA_SHELL_PRINT_f PrintFunc);
++void AmbaShell_CommandUart(UINT32 ArgCount, char * const * pArgVector, AMBA_SHELL_PRINT_f PrintFunc);
+ 
+ #if defined(CONFIG_SOC_CV2FS)
+ void AmbaShell_CommandFuSa(UINT32 ArgCount, char * const * pArgVector, AMBA_SHELL_PRINT_f PrintFunc);
+diff --git a/rtos/cortex_a/vendors/arm/arm-trusted-firmware/bin/cv2fs/bl31.bin b/rtos/cortex_a/vendors/arm/arm-trusted-firmware/bin/cv2fs/bl31.bin
+index 80cec624..511a6225 100755
+Binary files a/rtos/cortex_a/vendors/arm/arm-trusted-firmware/bin/cv2fs/bl31.bin and b/rtos/cortex_a/vendors/arm/arm-trusted-firmware/bin/cv2fs/bl31.bin differ
